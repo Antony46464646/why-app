@@ -3,18 +3,14 @@ import sqlite3
 from datetime import datetime
 import hashlib
 
-# -----------------------------
-# PAGE CONFIG
-# -----------------------------
 st.set_page_config(page_title="WHY", layout="centered")
 
 # -----------------------------
-# DATABASE SETUP
+# DATABASE
 # -----------------------------
 conn = sqlite3.connect("progress.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# Users table (NEW)
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     email TEXT PRIMARY KEY,
@@ -23,7 +19,6 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """)
 
-# Progress table (unchanged for now)
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS progress (
     session_id TEXT PRIMARY KEY,
@@ -33,16 +28,15 @@ CREATE TABLE IF NOT EXISTS progress (
     updated_at TEXT
 )
 """)
-
 conn.commit()
 
 # -----------------------------
-# PASSWORD HELPERS (NEW)
+# AUTH HELPERS
 # -----------------------------
-def hash_password(password: str) -> str:
+def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-def create_user(email: str, password: str) -> bool:
+def create_user(email, password):
     try:
         cursor.execute(
             "INSERT INTO users VALUES (?, ?, ?)",
@@ -51,9 +45,9 @@ def create_user(email: str, password: str) -> bool:
         conn.commit()
         return True
     except sqlite3.IntegrityError:
-        return False  # user already exists
+        return False
 
-def verify_user(email: str, password: str) -> bool:
+def verify_user(email, password):
     cursor.execute(
         "SELECT password_hash FROM users WHERE email = ?",
         (email,)
@@ -64,13 +58,55 @@ def verify_user(email: str, password: str) -> bool:
     return row[0] == hash_password(password)
 
 # -----------------------------
-# SESSION ID
+# SESSION STATE
 # -----------------------------
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if "auth_mode" not in st.session_state:
+    st.session_state.auth_mode = "login"
+
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(id(st.session_state))
 
 # -----------------------------
-# LOAD SAVED PROGRESS
+# LOGIN / REGISTER UI
+# -----------------------------
+if not st.session_state.logged_in:
+    st.title("WHY")
+
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+
+    if st.session_state.auth_mode == "login":
+        if st.button("Login"):
+            if verify_user(email, password):
+                st.session_state.logged_in = True
+                st.rerun()
+            else:
+                st.error("Invalid email or password")
+
+        if st.button("Create new account"):
+            st.session_state.auth_mode = "register"
+            st.rerun()
+
+    else:
+        if st.button("Register"):
+            if create_user(email, password):
+                st.success("Account created. Please log in.")
+                st.session_state.auth_mode = "login"
+                st.rerun()
+            else:
+                st.error("Email already exists")
+
+        if st.button("Back to login"):
+            st.session_state.auth_mode = "login"
+            st.rerun()
+
+    st.stop()
+
+# -----------------------------
+# LOAD PROGRESS (UNCHANGED)
 # -----------------------------
 cursor.execute(
     "SELECT stage, stage1, stage2 FROM progress WHERE session_id = ?",
@@ -87,12 +123,11 @@ else:
         st.session_state.stage = "landing"
 
 # -----------------------------
-# SAVE FUNCTION
+# SAVE / RESET
 # -----------------------------
 def save_progress():
     cursor.execute("""
         INSERT OR REPLACE INTO progress
-        (session_id, stage, stage1, stage2, updated_at)
         VALUES (?, ?, ?, ?, ?)
     """, (
         st.session_state.session_id,
@@ -103,9 +138,6 @@ def save_progress():
     ))
     conn.commit()
 
-# -----------------------------
-# RESET FUNCTION
-# -----------------------------
 def reset_journey():
     cursor.execute(
         "DELETE FROM progress WHERE session_id = ?",
@@ -113,15 +145,15 @@ def reset_journey():
     )
     conn.commit()
 
-    for key in ["stage", "first_reflection", "self_reflection"]:
-        if key in st.session_state:
-            del st.session_state[key]
+    for k in ["stage", "first_reflection", "self_reflection"]:
+        if k in st.session_state:
+            del st.session_state[k]
 
     st.session_state.stage = "landing"
     st.rerun()
 
 # -----------------------------
-# APP FLOW (UNCHANGED)
+# APP FLOW (SAME AS BEFORE)
 # -----------------------------
 if st.session_state.stage == "landing":
     st.title("WHY")
@@ -134,9 +166,7 @@ if st.session_state.stage == "landing":
 
 elif st.session_state.stage == "arrival":
     st.subheader("Stage 1 · Arrival")
-    st.write("What question or feeling brought you here today?")
-
-    user_input = st.text_area("", height=150)
+    user_input = st.text_area("What brought you here today?", height=150)
 
     if st.button("Continue"):
         if user_input.strip():
@@ -144,12 +174,9 @@ elif st.session_state.stage == "arrival":
             st.session_state.stage = "reflection"
             save_progress()
             st.rerun()
-        else:
-            st.warning("Even one word is enough.")
 
 elif st.session_state.stage == "reflection":
     st.subheader("Reflection")
-    st.write("That question matters.")
     st.info(st.session_state.first_reflection)
 
     if st.button("Continue deeper"):
@@ -159,7 +186,7 @@ elif st.session_state.stage == "reflection":
 
 elif st.session_state.stage == "self":
     st.subheader("Stage 2 · Self")
-    self_input = st.text_area("Write whatever comes.", height=150)
+    self_input = st.text_area("What feels most present right now?", height=150)
 
     if st.button("Continue"):
         if self_input.strip():
@@ -167,14 +194,10 @@ elif st.session_state.stage == "self":
             st.session_state.stage = "pause"
             save_progress()
             st.rerun()
-        else:
-            st.warning("There is no wrong answer.")
 
 elif st.session_state.stage == "pause":
     st.subheader("Pause")
     st.write("You’ve gone far enough for now.")
-
-    save_progress()
 
     if st.button("Start a new journey"):
         reset_journey()
