@@ -26,10 +26,9 @@ CREATE TABLE IF NOT EXISTS auth_state (
 )
 """)
 
-# 🔥 TEMP FIX: drop old progress table
+# 🔥 DEV MODE: reset progress table (OK for now)
 cursor.execute("DROP TABLE IF EXISTS progress")
 
-# ✅ Recreate progress correctly
 cursor.execute("""
 CREATE TABLE progress (
     user_email TEXT PRIMARY KEY,
@@ -84,6 +83,22 @@ def logout_user():
     conn.commit()
 
 # -----------------------------
+# DB HELPER (6.6 FIX)
+# -----------------------------
+def load_user_progress(email):
+    cursor.execute(
+        "SELECT stage, stage1, stage2 FROM progress WHERE user_email = ?",
+        (email,)
+    )
+    row = cursor.fetchone()
+    if row:
+        st.session_state.stage = row[0]
+        st.session_state.first_reflection = row[1]
+        st.session_state.self_reflection = row[2]
+    else:
+        st.session_state.stage = "landing"
+
+# -----------------------------
 # SESSION
 # -----------------------------
 if "user_email" not in st.session_state:
@@ -102,6 +117,7 @@ if not st.session_state.user_email:
         if verify_user(email, password):
             set_logged_in(email)
             st.session_state.user_email = email
+            st.session_state.pop("stage", None)  # 🔑 force reload
             st.rerun()
         else:
             st.error("Invalid email or password")
@@ -125,24 +141,13 @@ if st.button("Logout"):
     st.rerun()
 
 # -----------------------------
-# LOAD USER PROGRESS
+# ENTRY / RESTORE (6.6 FIX)
 # -----------------------------
-cursor.execute(
-    "SELECT stage, stage1, stage2 FROM progress WHERE user_email = ?",
-    (st.session_state.user_email,)
-)
-row = cursor.fetchone()
-
-if row:
-    st.session_state.stage = row[0]
-    st.session_state.first_reflection = row[1]
-    st.session_state.self_reflection = row[2]
-else:
-    if "stage" not in st.session_state:
-        st.session_state.stage = "landing"
+if "stage" not in st.session_state:
+    load_user_progress(st.session_state.user_email)
 
 # -----------------------------
-# SAVE / RESET (USER-BASED)
+# SAVE / RESET
 # -----------------------------
 def save_progress():
     cursor.execute("""
