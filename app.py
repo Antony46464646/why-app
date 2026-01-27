@@ -20,6 +20,13 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 
 cursor.execute("""
+CREATE TABLE IF NOT EXISTS auth_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    email TEXT
+)
+""")
+
+cursor.execute("""
 CREATE TABLE IF NOT EXISTS progress (
     session_id TEXT PRIMARY KEY,
     stage TEXT,
@@ -57,56 +64,68 @@ def verify_user(email, password):
         return False
     return row[0] == hash_password(password)
 
-# -----------------------------
-# SESSION STATE
-# -----------------------------
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
+def set_logged_in(email):
+    cursor.execute(
+        "INSERT OR REPLACE INTO auth_state (id, email) VALUES (1, ?)",
+        (email,)
+    )
+    conn.commit()
 
-if "auth_mode" not in st.session_state:
-    st.session_state.auth_mode = "login"
+def get_logged_in():
+    cursor.execute("SELECT email FROM auth_state WHERE id = 1")
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+def logout_user():
+    cursor.execute("DELETE FROM auth_state WHERE id = 1")
+    conn.commit()
+
+# -----------------------------
+# SESSION
+# -----------------------------
+if "user_email" not in st.session_state:
+    st.session_state.user_email = get_logged_in()
 
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(id(st.session_state))
 
 # -----------------------------
-# LOGIN / REGISTER UI
+# LOGIN / REGISTER
 # -----------------------------
-if not st.session_state.logged_in:
+if not st.session_state.user_email:
     st.title("WHY")
 
     email = st.text_input("Email")
     password = st.text_input("Password", type="password")
 
-    if st.session_state.auth_mode == "login":
-        if st.button("Login"):
-            if verify_user(email, password):
-                st.session_state.logged_in = True
-                st.rerun()
-            else:
-                st.error("Invalid email or password")
-
-        if st.button("Create new account"):
-            st.session_state.auth_mode = "register"
+    if st.button("Login"):
+        if verify_user(email, password):
+            set_logged_in(email)
+            st.session_state.user_email = email
             st.rerun()
+        else:
+            st.error("Invalid email or password")
 
-    else:
-        if st.button("Register"):
-            if create_user(email, password):
-                st.success("Account created. Please log in.")
-                st.session_state.auth_mode = "login"
-                st.rerun()
-            else:
-                st.error("Email already exists")
+    st.divider()
 
-        if st.button("Back to login"):
-            st.session_state.auth_mode = "login"
-            st.rerun()
+    if st.button("Create new account"):
+        if create_user(email, password):
+            st.success("Account created. Please log in.")
+        else:
+            st.error("Email already exists")
 
     st.stop()
 
 # -----------------------------
-# LOAD PROGRESS (UNCHANGED)
+# LOGOUT
+# -----------------------------
+if st.button("Logout"):
+    logout_user()
+    st.session_state.clear()
+    st.rerun()
+
+# -----------------------------
+# LOAD PROGRESS (still session-based)
 # -----------------------------
 cursor.execute(
     "SELECT stage, stage1, stage2 FROM progress WHERE session_id = ?",
@@ -153,7 +172,7 @@ def reset_journey():
     st.rerun()
 
 # -----------------------------
-# APP FLOW (SAME AS BEFORE)
+# APP FLOW
 # -----------------------------
 if st.session_state.stage == "landing":
     st.title("WHY")
