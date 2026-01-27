@@ -80,7 +80,7 @@ def logout_user():
     conn.commit()
 
 # -----------------------------
-# DB HELPER (RESTORE PROGRESS)
+# DB HELPER
 # -----------------------------
 def load_user_progress(email):
     cursor.execute(
@@ -96,10 +96,13 @@ def load_user_progress(email):
         st.session_state.stage = "landing"
 
 # -----------------------------
-# SESSION
+# SESSION DEFAULTS
 # -----------------------------
 if "user_email" not in st.session_state:
     st.session_state.user_email = get_logged_in()
+
+if "register_attempted" not in st.session_state:
+    st.session_state.register_attempted = False
 
 # -----------------------------
 # LOGIN / REGISTER
@@ -115,17 +118,22 @@ if not st.session_state.user_email:
             set_logged_in(email)
             st.session_state.user_email = email
             st.session_state.pop("stage", None)
+            st.session_state.register_attempted = False
             st.rerun()
         else:
             st.error("Invalid email or password")
 
     st.divider()
 
-    if st.button("Create new account"):
-        if create_user(email, password):
-            st.success("Account created. Please log in.")
-        else:
-            st.error("Email already exists")
+    if not st.session_state.register_attempted:
+        if st.button("Create new account"):
+            st.session_state.register_attempted = True
+            if create_user(email, password):
+                st.success("Account created. Please log in.")
+            else:
+                st.error("Email already exists. Please log in.")
+    else:
+        st.info("If your email already exists, please use Login above.")
 
     st.stop()
 
@@ -138,7 +146,7 @@ if st.button("Logout"):
     st.rerun()
 
 # -----------------------------
-# ENTRY / RESTORE (FIXED)
+# ENTRY / RESTORE
 # -----------------------------
 if "stage" not in st.session_state:
     load_user_progress(st.session_state.user_email)
