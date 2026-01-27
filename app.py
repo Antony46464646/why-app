@@ -26,9 +26,12 @@ CREATE TABLE IF NOT EXISTS auth_state (
 )
 """)
 
-# UPDATED: progress tied to user_email
+# 🔥 TEMP FIX: drop old progress table
+cursor.execute("DROP TABLE IF EXISTS progress")
+
+# ✅ Recreate progress correctly
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS progress (
+CREATE TABLE progress (
     user_email TEXT PRIMARY KEY,
     stage TEXT,
     stage1 TEXT,
@@ -36,6 +39,7 @@ CREATE TABLE IF NOT EXISTS progress (
     updated_at TEXT
 )
 """)
+
 conn.commit()
 
 # -----------------------------
