@@ -26,9 +26,10 @@ CREATE TABLE IF NOT EXISTS auth_state (
 )
 """)
 
+# UPDATED: progress tied to user_email
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS progress (
-    session_id TEXT PRIMARY KEY,
+    user_email TEXT PRIMARY KEY,
     stage TEXT,
     stage1 TEXT,
     stage2 TEXT,
@@ -60,9 +61,7 @@ def verify_user(email, password):
         (email,)
     )
     row = cursor.fetchone()
-    if not row:
-        return False
-    return row[0] == hash_password(password)
+    return row and row[0] == hash_password(password)
 
 def set_logged_in(email):
     cursor.execute(
@@ -85,9 +84,6 @@ def logout_user():
 # -----------------------------
 if "user_email" not in st.session_state:
     st.session_state.user_email = get_logged_in()
-
-if "session_id" not in st.session_state:
-    st.session_state.session_id = str(id(st.session_state))
 
 # -----------------------------
 # LOGIN / REGISTER
@@ -125,11 +121,11 @@ if st.button("Logout"):
     st.rerun()
 
 # -----------------------------
-# LOAD PROGRESS (still session-based)
+# LOAD USER PROGRESS
 # -----------------------------
 cursor.execute(
-    "SELECT stage, stage1, stage2 FROM progress WHERE session_id = ?",
-    (st.session_state.session_id,)
+    "SELECT stage, stage1, stage2 FROM progress WHERE user_email = ?",
+    (st.session_state.user_email,)
 )
 row = cursor.fetchone()
 
@@ -142,14 +138,14 @@ else:
         st.session_state.stage = "landing"
 
 # -----------------------------
-# SAVE / RESET
+# SAVE / RESET (USER-BASED)
 # -----------------------------
 def save_progress():
     cursor.execute("""
         INSERT OR REPLACE INTO progress
         VALUES (?, ?, ?, ?, ?)
     """, (
-        st.session_state.session_id,
+        st.session_state.user_email,
         st.session_state.stage,
         st.session_state.get("first_reflection"),
         st.session_state.get("self_reflection"),
@@ -159,8 +155,8 @@ def save_progress():
 
 def reset_journey():
     cursor.execute(
-        "DELETE FROM progress WHERE session_id = ?",
-        (st.session_state.session_id,)
+        "DELETE FROM progress WHERE user_email = ?",
+        (st.session_state.user_email,)
     )
     conn.commit()
 
