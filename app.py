@@ -26,11 +26,8 @@ CREATE TABLE IF NOT EXISTS auth_state (
 )
 """)
 
-# 🔥 DEV MODE: reset progress table (OK for now)
-cursor.execute("DROP TABLE IF EXISTS progress")
-
 cursor.execute("""
-CREATE TABLE progress (
+CREATE TABLE IF NOT EXISTS progress (
     user_email TEXT PRIMARY KEY,
     stage TEXT,
     stage1 TEXT,
@@ -83,7 +80,7 @@ def logout_user():
     conn.commit()
 
 # -----------------------------
-# DB HELPER (6.6 FIX)
+# DB HELPER (RESTORE PROGRESS)
 # -----------------------------
 def load_user_progress(email):
     cursor.execute(
@@ -117,7 +114,7 @@ if not st.session_state.user_email:
         if verify_user(email, password):
             set_logged_in(email)
             st.session_state.user_email = email
-            st.session_state.pop("stage", None)  # 🔑 force reload
+            st.session_state.pop("stage", None)
             st.rerun()
         else:
             st.error("Invalid email or password")
@@ -141,7 +138,7 @@ if st.button("Logout"):
     st.rerun()
 
 # -----------------------------
-# ENTRY / RESTORE (6.6 FIX)
+# ENTRY / RESTORE (FIXED)
 # -----------------------------
 if "stage" not in st.session_state:
     load_user_progress(st.session_state.user_email)
