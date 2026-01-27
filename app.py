@@ -65,6 +65,23 @@ def save_progress():
     conn.commit()
 
 # -----------------------------
+# RESET FUNCTION (NEW)
+# -----------------------------
+def reset_journey():
+    cursor.execute(
+        "DELETE FROM progress WHERE session_id = ?",
+        (st.session_state.session_id,)
+    )
+    conn.commit()
+
+    for key in ["stage", "first_reflection", "self_reflection"]:
+        if key in st.session_state:
+            del st.session_state[key]
+
+    st.session_state.stage = "landing"
+    st.rerun()
+
+# -----------------------------
 # LANDING
 # -----------------------------
 if st.session_state.stage == "landing":
@@ -150,3 +167,8 @@ elif st.session_state.stage == "pause":
     )
 
     save_progress()
+
+    st.divider()
+
+    if st.button("Start a new journey"):
+        reset_journey()
