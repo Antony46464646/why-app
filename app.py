@@ -1,6 +1,7 @@
 import streamlit as st
 import sqlite3
 from datetime import datetime
+import hashlib
 
 # -----------------------------
 # PAGE CONFIG
@@ -13,6 +14,16 @@ st.set_page_config(page_title="WHY", layout="centered")
 conn = sqlite3.connect("progress.db", check_same_thread=False)
 cursor = conn.cursor()
 
+# Users table (NEW)
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    email TEXT PRIMARY KEY,
+    password_hash TEXT,
+    created_at TEXT
+)
+""")
+
+# Progress table (unchanged for now)
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS progress (
     session_id TEXT PRIMARY KEY,
@@ -22,7 +33,35 @@ CREATE TABLE IF NOT EXISTS progress (
     updated_at TEXT
 )
 """)
+
 conn.commit()
+
+# -----------------------------
+# PASSWORD HELPERS (NEW)
+# -----------------------------
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def create_user(email: str, password: str) -> bool:
+    try:
+        cursor.execute(
+            "INSERT INTO users VALUES (?, ?, ?)",
+            (email, hash_password(password), datetime.utcnow().isoformat())
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False  # user already exists
+
+def verify_user(email: str, password: str) -> bool:
+    cursor.execute(
+        "SELECT password_hash FROM users WHERE email = ?",
+        (email,)
+    )
+    row = cursor.fetchone()
+    if not row:
+        return False
+    return row[0] == hash_password(password)
 
 # -----------------------------
 # SESSION ID
@@ -65,7 +104,7 @@ def save_progress():
     conn.commit()
 
 # -----------------------------
-# RESET FUNCTION (NEW)
+# RESET FUNCTION
 # -----------------------------
 def reset_journey():
     cursor.execute(
@@ -82,7 +121,7 @@ def reset_journey():
     st.rerun()
 
 # -----------------------------
-# LANDING
+# APP FLOW (UNCHANGED)
 # -----------------------------
 if st.session_state.stage == "landing":
     st.title("WHY")
@@ -93,13 +132,9 @@ if st.session_state.stage == "landing":
         save_progress()
         st.rerun()
 
-# -----------------------------
-# STAGE 1 — ARRIVAL
-# -----------------------------
 elif st.session_state.stage == "arrival":
     st.subheader("Stage 1 · Arrival")
     st.write("What question or feeling brought you here today?")
-    st.write("Take your time. Write honestly.")
 
     user_input = st.text_area("", height=150)
 
@@ -112,19 +147,9 @@ elif st.session_state.stage == "arrival":
         else:
             st.warning("Even one word is enough.")
 
-# -----------------------------
-# REFLECTION
-# -----------------------------
 elif st.session_state.stage == "reflection":
     st.subheader("Reflection")
-
     st.write("That question matters.")
-    st.write(
-        "You don’t need to solve it right now. "
-        "Just noticing it is enough for today."
-    )
-
-    st.write("You wrote:")
     st.info(st.session_state.first_reflection)
 
     if st.button("Continue deeper"):
@@ -132,17 +157,8 @@ elif st.session_state.stage == "reflection":
         save_progress()
         st.rerun()
 
-# -----------------------------
-# STAGE 2 — SELF
-# -----------------------------
 elif st.session_state.stage == "self":
     st.subheader("Stage 2 · Self")
-
-    st.write(
-        "When you sit with this feeling,\n"
-        "what feels most present right now?"
-    )
-
     self_input = st.text_area("Write whatever comes.", height=150)
 
     if st.button("Continue"):
@@ -154,21 +170,11 @@ elif st.session_state.stage == "self":
         else:
             st.warning("There is no wrong answer.")
 
-# -----------------------------
-# PAUSE
-# -----------------------------
 elif st.session_state.stage == "pause":
     st.subheader("Pause")
-
-    st.write(
-        "You’ve gone far enough for now.\n\n"
-        "We don’t need to rush meaning.\n"
-        "We’ll continue from here next time."
-    )
+    st.write("You’ve gone far enough for now.")
 
     save_progress()
-
-    st.divider()
 
     if st.button("Start a new journey"):
         reset_journey()
