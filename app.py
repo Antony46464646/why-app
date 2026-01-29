@@ -20,13 +20,6 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS auth_state (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    email TEXT
-)
-""")
-
-cursor.execute("""
 CREATE TABLE IF NOT EXISTS progress (
     user_email TEXT PRIMARY KEY,
     stage TEXT,
@@ -49,7 +42,7 @@ CREATE TABLE IF NOT EXISTS journey_history (
 conn.commit()
 
 # -----------------------------
-# AUTH HELPERS
+# AUTH HELPERS (SIMPLE & STABLE)
 # -----------------------------
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -73,24 +66,8 @@ def verify_user(email, password):
     row = cursor.fetchone()
     return row and row[0] == hash_password(password)
 
-def set_logged_in(email):
-    cursor.execute(
-        "INSERT OR REPLACE INTO auth_state (id, email) VALUES (1, ?)",
-        (email,)
-    )
-    conn.commit()
-
-def get_logged_in():
-    cursor.execute("SELECT email FROM auth_state WHERE id = 1")
-    row = cursor.fetchone()
-    return row[0] if row else None
-
-def logout_user():
-    cursor.execute("DELETE FROM auth_state WHERE id = 1")
-    conn.commit()
-
 # -----------------------------
-# PROGRESS LOAD (FIXED)
+# JOURNEY HELPERS
 # -----------------------------
 def load_user_progress(email):
     cursor.execute(
@@ -98,7 +75,6 @@ def load_user_progress(email):
         (email,)
     )
     row = cursor.fetchone()
-
     if row:
         st.session_state.stage = row[0]
         st.session_state.first_reflection = row[1]
@@ -106,9 +82,6 @@ def load_user_progress(email):
     else:
         st.session_state.stage = "landing"
 
-# -----------------------------
-# SAVE / RESET
-# -----------------------------
 def save_progress():
     cursor.execute("""
         INSERT OR REPLACE INTO progress
@@ -140,26 +113,27 @@ def reset_journey():
         (st.session_state.user_email,)
     )
     conn.commit()
-
     for k in ["stage", "first_reflection", "self_reflection"]:
         st.session_state.pop(k, None)
-
     st.session_state.stage = "landing"
     st.rerun()
 
 # -----------------------------
-# SESSION DEFAULTS (FIXED ORDER)
+# SESSION DEFAULTS
 # -----------------------------
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
 if "user_email" not in st.session_state:
-    st.session_state.user_email = get_logged_in()
+    st.session_state.user_email = None
 
 if "view_history" not in st.session_state:
     st.session_state.view_history = False
 
 # -----------------------------
-# LOGIN / REGISTER
+# LOGIN / REGISTER (NEW FLOW)
 # -----------------------------
-if not st.session_state.user_email:
+if not st.session_state.logged_in:
     st.title("WHY")
     st.caption("This space is private. Nothing is shared.")
 
@@ -168,9 +142,10 @@ if not st.session_state.user_email:
 
     if st.button("Login"):
         if verify_user(email, password):
-            set_logged_in(email)
+            st.session_state.logged_in = True
             st.session_state.user_email = email
             st.session_state.pop("stage", None)
+            st.success("Login successful")
             st.rerun()
         else:
             st.error("Invalid email or password")
@@ -181,7 +156,7 @@ if not st.session_state.user_email:
         if create_user(email, password):
             st.success("Account created. Please log in.")
         else:
-            st.error("Email already exists. Please log in.")
+            st.error("Email already exists")
 
     st.stop()
 
@@ -189,7 +164,6 @@ if not st.session_state.user_email:
 # LOGOUT
 # -----------------------------
 if st.button("Logout"):
-    logout_user()
     st.session_state.clear()
     st.rerun()
 
