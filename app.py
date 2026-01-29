@@ -1,3 +1,114 @@
+import streamlit as st
+import sqlite3
+from datetime import datetime
+import hashlib
+
+st.set_page_config(page_title="WHY", layout="centered")
+
+# -----------------------------
+# DATABASE
+# -----------------------------
+conn = sqlite3.connect("progress.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    email TEXT PRIMARY KEY,
+    password_hash TEXT,
+    created_at TEXT
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS auth_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    email TEXT
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS progress (
+    user_email TEXT PRIMARY KEY,
+    stage TEXT,
+    stage1 TEXT,
+    stage2 TEXT,
+    updated_at TEXT
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS journey_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_email TEXT,
+    stage1 TEXT,
+    stage2 TEXT,
+    saved_at TEXT
+)
+""")
+
+conn.commit()
+
+# -----------------------------
+# AUTH HELPERS
+# -----------------------------
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def create_user(email, password):
+    try:
+        cursor.execute(
+            "INSERT INTO users VALUES (?, ?, ?)",
+            (email, hash_password(password), datetime.utcnow().isoformat())
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+def verify_user(email, password):
+    cursor.execute(
+        "SELECT password_hash FROM users WHERE email = ?",
+        (email,)
+    )
+    row = cursor.fetchone()
+    return row and row[0] == hash_password(password)
+
+def set_logged_in(email):
+    cursor.execute(
+        "INSERT OR REPLACE INTO auth_state (id, email) VALUES (1, ?)",
+        (email,)
+    )
+    conn.commit()
+
+def get_logged_in():
+    cursor.execute("SELECT email FROM auth_state WHERE id = 1")
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+def logout_user():
+    cursor.execute("DELETE FROM auth_state WHERE id = 1")
+    conn.commit()
+
+# -----------------------------
+# PROGRESS LOAD (FIXED)
+# -----------------------------
+def load_user_progress(email):
+    cursor.execute(
+        "SELECT stage, stage1, stage2 FROM progress WHERE user_email = ?",
+        (email,)
+    )
+    row = cursor.fetchone()
+
+    if row:
+        st.session_state.stage = row[0]
+        st.session_state.first_reflection = row[1]
+        st.session_state.self_reflection = row[2]
+    else:
+        st.session_state.stage = "landing"
+
+# -----------------------------
+# SAVE / RESET
+# -----------------------------
 def save_progress():
     cursor.execute("""
         INSERT OR REPLACE INTO progress
@@ -31,14 +142,13 @@ def reset_journey():
     conn.commit()
 
     for k in ["stage", "first_reflection", "self_reflection"]:
-        if k in st.session_state:
-            del st.session_state[k]
+        st.session_state.pop(k, None)
 
     st.session_state.stage = "landing"
     st.rerun()
 
 # -----------------------------
-# SESSION DEFAULTS
+# SESSION DEFAULTS (FIXED ORDER)
 # -----------------------------
 if "user_email" not in st.session_state:
     st.session_state.user_email = get_logged_in()
@@ -173,7 +283,6 @@ elif st.session_state.stage == "pause":
     st.write("You’ve gone far enough for now.")
     st.write("Nothing needs to be solved. We’ll continue when you return.")
 
-    # 🔑 Auto-save journey to history (LOCKED DECISION)
     archive_current_journey()
 
     if st.button("Start a new journey"):
