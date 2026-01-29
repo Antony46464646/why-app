@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS auth_state (
 )
 """)
 
+# Active journey (one per user)
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS progress (
     user_email TEXT PRIMARY KEY,
@@ -33,6 +34,17 @@ CREATE TABLE IF NOT EXISTS progress (
     stage1 TEXT,
     stage2 TEXT,
     updated_at TEXT
+)
+""")
+
+# Journey history (NEW)
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS journey_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_email TEXT,
+    stage1 TEXT,
+    stage2 TEXT,
+    saved_at TEXT
 )
 """)
 
@@ -80,7 +92,7 @@ def logout_user():
     conn.commit()
 
 # -----------------------------
-# DB HELPER
+# DB HELPERS
 # -----------------------------
 def load_user_progress(email):
     cursor.execute(
@@ -95,65 +107,6 @@ def load_user_progress(email):
     else:
         st.session_state.stage = "landing"
 
-# -----------------------------
-# SESSION DEFAULTS
-# -----------------------------
-if "user_email" not in st.session_state:
-    st.session_state.user_email = get_logged_in()
-
-if "register_attempted" not in st.session_state:
-    st.session_state.register_attempted = False
-
-# -----------------------------
-# LOGIN / REGISTER
-# -----------------------------
-if not st.session_state.user_email:
-    st.title("WHY")
-
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        if verify_user(email, password):
-            set_logged_in(email)
-            st.session_state.user_email = email
-            st.session_state.pop("stage", None)
-            st.session_state.register_attempted = False
-            st.rerun()
-        else:
-            st.error("Invalid email or password")
-
-    st.divider()
-
-    if not st.session_state.register_attempted:
-        if st.button("Create new account"):
-            st.session_state.register_attempted = True
-            if create_user(email, password):
-                st.success("Account created. Please log in.")
-            else:
-                st.error("Email already exists. Please log in.")
-    else:
-        st.info("If your email already exists, please use Login above.")
-
-    st.stop()
-
-# -----------------------------
-# LOGOUT
-# -----------------------------
-if st.button("Logout"):
-    logout_user()
-    st.session_state.clear()
-    st.rerun()
-
-# -----------------------------
-# ENTRY / RESTORE
-# -----------------------------
-if "stage" not in st.session_state:
-    load_user_progress(st.session_state.user_email)
-
-# -----------------------------
-# SAVE / RESET
-# -----------------------------
 def save_progress():
     cursor.execute("""
         INSERT OR REPLACE INTO progress
@@ -161,6 +114,18 @@ def save_progress():
     """, (
         st.session_state.user_email,
         st.session_state.stage,
+        st.session_state.get("first_reflection"),
+        st.session_state.get("self_reflection"),
+        datetime.utcnow().isoformat()
+    ))
+    conn.commit()
+
+def archive_current_journey():
+    cursor.execute("""
+        INSERT INTO journey_history (user_email, stage1, stage2, saved_at)
+        VALUES (?, ?, ?, ?)
+    """, (
+        st.session_state.user_email,
         st.session_state.get("first_reflection"),
         st.session_state.get("self_reflection"),
         datetime.utcnow().isoformat()
@@ -182,22 +147,110 @@ def reset_journey():
     st.rerun()
 
 # -----------------------------
+# SESSION DEFAULTS
+# -----------------------------
+if "user_email" not in st.session_state:
+    st.session_state.user_email = get_logged_in()
+
+if "view_history" not in st.session_state:
+    st.session_state.view_history = False
+
+# -----------------------------
+# LOGIN / REGISTER
+# -----------------------------
+if not st.session_state.user_email:
+    st.title("WHY")
+    st.caption("This space is private. Nothing is shared.")
+
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
+        if verify_user(email, password):
+            set_logged_in(email)
+            st.session_state.user_email = email
+            st.session_state.pop("stage", None)
+            st.rerun()
+        else:
+            st.error("Invalid email or password")
+
+    st.divider()
+
+    if st.button("Create new account"):
+        if create_user(email, password):
+            st.success("Account created. Please log in.")
+        else:
+            st.error("Email already exists. Please log in.")
+
+    st.stop()
+
+# -----------------------------
+# LOGOUT
+# -----------------------------
+if st.button("Logout"):
+    logout_user()
+    st.session_state.clear()
+    st.rerun()
+
+# -----------------------------
+# ENTRY / RESTORE
+# -----------------------------
+if "stage" not in st.session_state:
+    load_user_progress(st.session_state.user_email)
+
+# -----------------------------
+# HISTORY VIEW
+# -----------------------------
+if st.session_state.view_history:
+    st.title("Past journeys")
+
+    cursor.execute("""
+        SELECT stage1, stage2, saved_at
+        FROM journey_history
+        WHERE user_email = ?
+        ORDER BY saved_at DESC
+    """, (st.session_state.user_email,))
+    rows = cursor.fetchall()
+
+    if not rows:
+        st.info("No past journeys yet.")
+    else:
+        for stage1, stage2, saved_at in rows:
+            st.markdown(f"**Saved on:** {saved_at[:10]}")
+            st.write(stage1)
+            st.write(stage2)
+            st.divider()
+
+    if st.button("Back"):
+        st.session_state.view_history = False
+        st.rerun()
+
+    st.stop()
+
+# -----------------------------
 # APP FLOW
 # -----------------------------
 if st.session_state.stage == "landing":
     st.title("WHY")
-    st.write("The universe has questions. So do you.")
+    st.write("The universe has questions.")
+    st.write("You don’t need answers today.")
 
-    if st.button("Begin"):
+    if st.button("Begin gently"):
         st.session_state.stage = "arrival"
         save_progress()
         st.rerun()
 
-elif st.session_state.stage == "arrival":
-    st.subheader("Stage 1 · Arrival")
-    user_input = st.text_area("What brought you here today?", height=150)
+    if st.button("View past journeys"):
+        st.session_state.view_history = True
+        st.rerun()
 
-    if st.button("Continue"):
+elif st.session_state.stage == "arrival":
+    st.subheader("Arrival")
+    st.caption("There’s no right way to answer. Even a few words are enough.")
+
+    user_input = st.text_area("", height=150)
+
+    if st.button("Continue when ready"):
         if user_input.strip():
             st.session_state.first_reflection = user_input
             st.session_state.stage = "reflection"
@@ -208,16 +261,16 @@ elif st.session_state.stage == "reflection":
     st.subheader("Reflection")
     st.info(st.session_state.first_reflection)
 
-    if st.button("Continue deeper"):
+    if st.button("Go a little deeper"):
         st.session_state.stage = "self"
         save_progress()
         st.rerun()
 
 elif st.session_state.stage == "self":
-    st.subheader("Stage 2 · Self")
-    self_input = st.text_area("What feels most present right now?", height=150)
+    st.subheader("Self")
+    self_input = st.text_area("", height=150)
 
-    if st.button("Continue"):
+    if st.button("Continue when ready"):
         if self_input.strip():
             st.session_state.self_reflection = self_input
             st.session_state.stage = "pause"
@@ -227,6 +280,10 @@ elif st.session_state.stage == "self":
 elif st.session_state.stage == "pause":
     st.subheader("Pause")
     st.write("You’ve gone far enough for now.")
+    st.write("Nothing needs to be solved. We’ll continue when you return.")
+
+    # 🔑 Auto-save journey to history (LOCKED DECISION)
+    archive_current_journey()
 
     if st.button("Start a new journey"):
         reset_journey()
