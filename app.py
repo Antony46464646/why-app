@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 from datetime import datetime
 import hashlib
+import secrets
 
 st.set_page_config(page_title="WHY", layout="centered")
 
@@ -15,6 +16,14 @@ cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     email TEXT PRIMARY KEY,
     password_hash TEXT,
+    created_at TEXT
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS login_tokens (
+    token TEXT PRIMARY KEY,
+    user_email TEXT,
     created_at TEXT
 )
 """)
@@ -42,7 +51,7 @@ CREATE TABLE IF NOT EXISTS journey_history (
 conn.commit()
 
 # -----------------------------
-# AUTH HELPERS (SIMPLE & STABLE)
+# AUTH HELPERS
 # -----------------------------
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -65,6 +74,35 @@ def verify_user(email, password):
     )
     row = cursor.fetchone()
     return row and row[0] == hash_password(password)
+
+def create_login_token(email):
+    token = secrets.token_urlsafe(32)
+    cursor.execute(
+        "INSERT INTO login_tokens VALUES (?, ?, ?)",
+        (token, email, datetime.utcnow().isoformat())
+    )
+    conn.commit()
+    st.experimental_set_query_params(token=token)
+
+def get_user_from_token():
+    params = st.experimental_get_query_params()
+    token = params.get("token", [None])[0]
+    if not token:
+        return None
+    cursor.execute(
+        "SELECT user_email FROM login_tokens WHERE token = ?",
+        (token,)
+    )
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+def clear_login_token():
+    params = st.experimental_get_query_params()
+    token = params.get("token", [None])[0]
+    if token:
+        cursor.execute("DELETE FROM login_tokens WHERE token = ?", (token,))
+        conn.commit()
+    st.experimental_set_query_params()
 
 # -----------------------------
 # JOURNEY HELPERS
@@ -119,21 +157,18 @@ def reset_journey():
     st.rerun()
 
 # -----------------------------
-# SESSION DEFAULTS
+# SESSION BOOTSTRAP
 # -----------------------------
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-
 if "user_email" not in st.session_state:
-    st.session_state.user_email = None
+    st.session_state.user_email = get_user_from_token()
 
 if "view_history" not in st.session_state:
     st.session_state.view_history = False
 
 # -----------------------------
-# LOGIN / REGISTER (NEW FLOW)
+# LOGIN / REGISTER
 # -----------------------------
-if not st.session_state.logged_in:
+if not st.session_state.user_email:
     st.title("WHY")
     st.caption("This space is private. Nothing is shared.")
 
@@ -142,7 +177,7 @@ if not st.session_state.logged_in:
 
     if st.button("Login"):
         if verify_user(email, password):
-            st.session_state.logged_in = True
+            create_login_token(email)
             st.session_state.user_email = email
             st.session_state.pop("stage", None)
             st.success("Login successful")
@@ -164,6 +199,7 @@ if not st.session_state.logged_in:
 # LOGOUT
 # -----------------------------
 if st.button("Logout"):
+    clear_login_token()
     st.session_state.clear()
     st.rerun()
 
